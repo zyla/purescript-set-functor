@@ -25,13 +25,36 @@ import Control.Monad.Eff.Unsafe (unsafePerformEff)
 import Control.Monad.ST (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Exists (Exists, mkExists, runExists)
 import Data.Foldable (class Foldable)
+import Data.Function (on)
 import Data.Maybe (Maybe)
+import Data.Monoid (class Monoid)
 import Data.Set as Set
 import Data.Unfoldable (class Unfoldable)
 
 type RealWorld = Unit
 
 newtype Set a = Set (STRef RealWorld (State a))
+
+instance eqSet :: Ord a => Eq (Set a) where
+  eq = eq `on` toSet
+
+-- Note: NOT an instance of Eq1, as the `Eq` instance requires `Ord` constraint.
+
+instance showSet :: (Ord a, Show a) => Show (Set a) where
+  show = show <<< toSet
+
+instance ordSet :: Ord a => Ord (Set a) where
+  compare = compare `on` toSet
+
+-- Note: Also not an instance of Ord1, due to Eq1 requirement.
+
+instance semigroupSet :: Ord a => Semigroup (Set a) where
+  append = union
+
+instance monoidSet :: Ord a => Monoid (Set a) where
+  mempty = empty
+
+-- Note: NOT a Foldable instance, as forcing the set requires `Ord`.
 
 data State a = Plain (Set.Set a) | Mapped (Exists (MappedF a))
 
