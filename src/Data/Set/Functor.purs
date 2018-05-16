@@ -21,32 +21,53 @@ module Data.Set.Functor
 
 import Prelude
 
+import Control.Monad.Eff.Unsafe (unsafePerformEff)
+import Control.Monad.ST (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Exists (Exists, mkExists, runExists)
 import Data.Foldable (class Foldable)
 import Data.Maybe (Maybe)
 import Data.Set as Set
 import Data.Unfoldable (class Unfoldable)
 
-data Set a =
-  Plain (Set.Set a) | Mapped (Exists (MappedF a))
+type RealWorld = Unit
+
+newtype Set a = Set (STRef RealWorld (State a))
+
+data State a = Plain (Set.Set a) | Mapped (Exists (MappedF a))
 
 data MappedF a b = MappedF (Set.Set b) (b -> a)
 
 runSet :: forall a r. (Set.Set a -> r) -> (forall b. Set.Set b -> (b -> a) -> r) -> Set a -> r
-runSet k1 _  (Plain set) = k1 set
-runSet _  k2 (Mapped ex) = runExists (\(MappedF set fn) -> k2 set fn) ex
+runSet k1 k2 (Set ref) = unsafePerformEff do
+  state <- readSTRef ref
+  case state of
+    Plain set -> pure (k1 set)
+    Mapped ex -> pure (runExists (\(MappedF set fn) -> k2 set fn) ex)
+
+mkSet :: forall a. State a -> Set a
+mkSet state = Set (unsafePerformEff (newSTRef state))
 
 mkMapped :: forall a b. Set.Set b -> (b -> a) -> Set a
-mkMapped set fn = Mapped (mkExists (MappedF set fn))
+mkMapped set fn = mkSet (Mapped (mkExists (MappedF set fn)))
 
 mapSet :: forall a b. (a -> b) -> Set a -> Set b
 mapSet f = runSet (\set -> mkMapped set f) (\set g -> mkMapped set (f <<< g))
 
 fromSet :: forall a. Set.Set a -> Set a
-fromSet = Plain
+fromSet = mkSet <<< Plain
 
 toSet :: forall a. Ord a => Set a -> Set.Set a
-toSet = runSet id (\set fn -> Set.map fn set)
+toSet (Set ref) = unsafePerformEff do
+  state <- readSTRef ref
+  case state of
+
+    Plain set ->
+      pure set
+
+    Mapped ex -> do
+      let set' = runExists (\(MappedF set fn) -> Set.map fn set) ex
+      _ <- writeSTRef ref (Plain set')
+      pure set'
 
 instance functorSet :: Functor Set where
   map = mapSet
